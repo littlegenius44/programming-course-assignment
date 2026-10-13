@@ -4,6 +4,8 @@
 
 GitHub Pages网址：[在线游玩](https://littlegenius44.github.io/programming-course-assignment/)。源码仓库：[programming-course-assignment](https://github.com/littlegenius44/programming-course-assignment)。本次仅上传Web及部署工作流；命令行与raylib版本按用户要求继续在本地修改，后续再上传。自动构建、子路径配置及发布分支说明见[部署说明](docs/deployment.md)。
 
+2026-10-13首次[部署运行](https://github.com/littlegenius44/programming-course-assignment/actions/runs/38343255990)已成功，GitHub运行122项测试、类型检查及构建通过；线上素材加载、演示侧栏、H提示交换与暂停恢复通过。
+
 当前阶段 A、B、C接入反馈、D1算法演示以及自动洗牌与免费H提示已完成：网页可以完整游玩三关。使用20×30棋盘、果园背景、九种水果及数字角标，支持昵称、k=3/4、真实交换与连锁动画、累计得分、计时、暂停、退出和重开。已加入轻消除、连锁爆炸、落地反馈及三档算法演示；当前仍使用生成素材。用户已单独批准本次GitHub Pages发布，其他D2课程整理及正式美术定稿仍推迟。
 
 ## 环境与运行
