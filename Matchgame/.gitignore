@@ -1,0 +1,20 @@
+# Release archives are published as GitHub assets instead of source files.
+/dist/
+
+# Local Visual Studio settings and generated build files.
+.vs/
+*.user
+*.suo
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+Win32/
+[Bb]in/
+[Oo]bj/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.ipch
+*.tlog
