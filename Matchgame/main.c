@@ -113,17 +113,18 @@ static void displayGame(const Game* game, const MatchResult* matches)
     if (_isatty(_fileno(stdin)) && _isatty(_fileno(stdout))) system("cls");
 #endif
     printf("\n========== 消消乐 · 二维数组算法演示 ==========\n");
-    printf("昵称：%s  k=%d  第%d关  分数：%d/%d  用时：%ld秒\n",
-        game->playerName, game->matchLength, game->level,
+    printf("昵称：%s  棋盘：%s %d×%d（列×行）  k=%d  第%d关  分数：%d/%d  用时：%ld秒\n",
+        game->playerName, getBoardSizeName(game->boardSize), game->cols, game->rows,
+        game->matchLength, game->level,
         game->score, getLevelTarget(game), getElapsedSeconds(game));
     printf("    ");
-    for (int col = 0; col < BOARD_COLS; ++col) // col：列编号
+    for (int col = 0; col < game->cols; ++col) // col：当前棋盘列编号
         printf("%3d", col + 1);
     putchar('\n');
-    for (int row = 0; row < BOARD_ROWS; ++row) // row：棋盘行
+    for (int row = 0; row < game->rows; ++row) // row：当前棋盘行
     {
         printf("%2d |", row + 1);
-        for (int col = 0; col < BOARD_COLS; ++col) // col：棋盘列
+        for (int col = 0; col < game->cols; ++col) // col：当前棋盘列
         {
             int value = game->board[row][col]; // 当前位置物品
             if (matches && matches->marked[row][col]) printf("[%d]", value);
@@ -240,6 +241,8 @@ static void displayResult(const Game* game)
         game->playerName, game->level, game->score, getElapsedSeconds(game));
     printf("有效交换：%d次；累计消除：%d格；最大连锁：%d轮。\n",
         game->successfulMoves, game->totalCleared, game->maxChain);
+    printf("棋盘：%s %d×%d（列×行）；k=%d。\n",
+        getBoardSizeName(game->boardSize), game->cols, game->rows, game->matchLength);
 }
 
 /* 主入口。参数：无；返回：0正常退出。 */
@@ -251,6 +254,7 @@ int main(void)
     char input[128]; // 命令输入
     char feedback[256] = ""; // 清屏后保留上一条提示或回合结果
     int k; // 消除长度
+    int boardSize; // 棋盘大小，与消除长度独立选择
     int mode; // 1正常、2演示
     int running = 1; // 是否继续运行程序
     int needsSettings = 1; // 是否需要填写设置
@@ -265,11 +269,13 @@ int main(void)
         {
             puts("\n消消乐课程作业：正常运行 / 分阶段算法演示");
             if (!readName(name) ||
+                !readNumber("请选择棋盘（1小型10×10 / 2中型20×15 / 3大型30×20，列×行）：",
+                    1, BOARD_SIZE_COUNT, &boardSize) ||
                 !readNumber("请选择消除长度 k（3/4/5）：", 3, 5, &k) ||
                 !readNumber("请选择运行模式（1正常 / 2演示）：", 1, 2, &mode)) break;
             needsSettings = 0;
         }
-        initializeGame(&game, name, k);
+        initializeGameWithSize(&game, name, k, boardSize);
         memset(&round, 0, sizeof(round));
         feedback[0] = '\0';
         for (;;)
@@ -291,7 +297,7 @@ int main(void)
             if (isCommand(input, 'Q')) break;
             if (isCommand(input, 'R'))
             {
-                initializeGame(&game, name, k);
+                initializeGameWithSize(&game, name, k, boardSize);
                 snprintf(feedback, sizeof(feedback), "已按原设置重新开始。");
                 continue;
             }
@@ -311,9 +317,13 @@ int main(void)
                 continue;
             }
             cursor = input;
-            if (!parseInteger(&cursor, 1, BOARD_ROWS, &row) ||
-                !parseInteger(&cursor, 1, BOARD_COLS, &col))
-            { snprintf(feedback, sizeof(feedback), "格式或坐标错误，请输入例如 3 5 D。"); continue; }
+            if (!parseInteger(&cursor, 1, game.rows, &row) ||
+                !parseInteger(&cursor, 1, game.cols, &col))
+            {
+                snprintf(feedback, sizeof(feedback),
+                    "格式或坐标错误，行范围1～%d，列范围1～%d；例如 3 5 D。", game.rows, game.cols);
+                continue;
+            }
             cursor = skipSpace(cursor);
             direction = *cursor;
             if (!direction || *skipSpace(cursor + 1) ||

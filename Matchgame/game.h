@@ -4,9 +4,10 @@
 
 #include <time.h>
 
-#define BOARD_ROWS 20          // 棋盘行数
-#define BOARD_COLS 30          // 棋盘列数
-#define BOARD_CELLS (BOARD_ROWS * BOARD_COLS) // 棋盘格子总数
+#define BOARD_ROWS 20          // 棋盘最大行数，实际行数使用Game.rows
+#define BOARD_COLS 30          // 棋盘最大列数，实际列数使用Game.cols
+#define BOARD_CELLS (BOARD_ROWS * BOARD_COLS) // 棋盘最大容量
+#define BOARD_SIZE_COUNT 3     // 小型、中型、大型三档
 #define ITEM_TYPES 9           // 物品种类
 #define PLAYER_NAME_LENGTH 32  // 昵称的 UTF-8 字节容量
 #define LEVEL_COUNT 3          // 关卡总数
@@ -16,6 +17,9 @@
 typedef struct
 {
     int board[BOARD_ROWS][BOARD_COLS]; // 1～9为物品，0为空位
+    int boardSize; // 1小型、2中型、3大型；与k独立选择
+    int rows; // 当前有效行数：10、15、20
+    int cols; // 当前有效列数：10、20、30
     char playerName[PLAYER_NAME_LENGTH]; // 玩家昵称
     int matchLength; // 连续消除长度
     int score; // 累计分数
@@ -91,8 +95,14 @@ typedef struct
     CellChange changes[BOARD_CELLS]; // 本阶段真实移动或补充记录
 } RoundExecution;
 
-/* 初始化游戏。game：输出状态；name：昵称；matchLength：3～5；返回：无。 */
+/* 按大型棋盘初始化，兼容原调用。game：输出状态；name：昵称；
+ * matchLength：3～5；返回：无。 */
 void initializeGame(Game* game, const char* name, int matchLength);
+/* 按所选尺寸初始化。game：输出状态；name：昵称；matchLength：3～5；
+ * boardSize：1～3，其他值按大型处理；返回：无。 */
+void initializeGameWithSize(Game* game, const char* name, int matchLength, int boardSize);
+/* 获取尺寸档名。boardSize：1～3，其他值按大型处理；返回：静态中文文本。 */
+const char* getBoardSizeName(int boardSize);
 /* 生成稳定且可操作的棋盘。game：当前状态；保留成绩；返回：无。 */
 void initializeBoard(Game* game);
 /* 扫描横纵匹配并去重。game：只读棋盘；result：输出统计；返回：去重数量。 */

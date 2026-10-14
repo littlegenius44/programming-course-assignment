@@ -7,7 +7,7 @@
 
 /* 根据方向求相邻位置。row/col：0起下标；direction：WASD；
  * targetRow/targetCol：输出位置；返回：是否在棋盘内。 */
-static int getTargetPosition(int row, int col, char direction,
+static int getTargetPosition(const Game* game, int row, int col, char direction,
     int* targetRow, int* targetCol)
 {
     *targetRow = row;
@@ -20,8 +20,8 @@ static int getTargetPosition(int row, int col, char direction,
     case 'D': ++*targetCol; break;
     default: return 0;
     }
-    return *targetRow >= 0 && *targetRow < BOARD_ROWS &&
-        *targetCol >= 0 && *targetCol < BOARD_COLS;
+    return *targetRow >= 0 && *targetRow < game->rows &&
+        *targetCol >= 0 && *targetCol < game->cols;
 }
 
 /* 交换两个合法位置。game：棋盘；r1/c1、r2/c2：0起下标；返回：无。 */
@@ -41,11 +41,11 @@ static int hasMatchAt(const Game* game, int row, int col)
     if (value == 0) return 0;
     for (int c = col - 1; c >= 0 && game->board[row][c] == value; --c) // c：左侧列
         ++horizontal;
-    for (int c = col + 1; c < BOARD_COLS && game->board[row][c] == value; ++c) // c：右侧列
+    for (int c = col + 1; c < game->cols && game->board[row][c] == value; ++c) // c：右侧列
         ++horizontal;
     for (int r = row - 1; r >= 0 && game->board[r][col] == value; --r) // r：上侧行
         ++vertical;
-    for (int r = row + 1; r < BOARD_ROWS && game->board[r][col] == value; ++r) // r：下侧行
+    for (int r = row + 1; r < game->rows && game->board[r][col] == value; ++r) // r：下侧行
         ++vertical;
     return horizontal >= game->matchLength || vertical >= game->matchLength;
 }
@@ -66,16 +66,16 @@ static int createsInitialMatch(const Game* game, int row, int col, int value)
 int findLegalMove(const Game* game, LegalMove* move)
 {
     Game copy = *game; // 只读查找使用的局部副本
-    for (int row = 0; row < BOARD_ROWS; ++row) // row：交换起点行
+    for (int row = 0; row < game->rows; ++row) // row：交换起点行
     {
-        for (int col = 0; col < BOARD_COLS; ++col) // col：交换起点列
+        for (int col = 0; col < game->cols; ++col) // col：交换起点列
         {
             for (int axis = 0; axis < 2; ++axis) // axis：右、下两种无重复方向
             {
                 int r = row + (axis == 1); // 目标行
                 int c = col + (axis == 0); // 目标列
                 int valid; // 是否会形成匹配
-                if (r >= BOARD_ROWS || c >= BOARD_COLS) continue;
+                if (r >= game->rows || c >= game->cols) continue;
                 swapItems(&copy, row, col, r, c);
                 valid = hasMatchAt(&copy, row, col) || hasMatchAt(&copy, r, c);
                 swapItems(&copy, row, col, r, c);
@@ -97,9 +97,9 @@ void initializeBoard(Game* game)
     LegalMove move; // 用于确认棋盘可操作
     for (int attempt = 0; attempt < 32; ++attempt) // attempt：有限生成次数
     {
-        for (int row = 0; row < BOARD_ROWS; ++row) // row：生成行
+        for (int row = 0; row < game->rows; ++row) // row：生成行
         {
-            for (int col = 0; col < BOARD_COLS; ++col) // col：生成列
+            for (int col = 0; col < game->cols; ++col) // col：生成列
             {
                 int value; // 不产生初始消除的候选
                 do { value = rand() % ITEM_TYPES + 1; }
@@ -111,8 +111,8 @@ void initializeBoard(Game* game)
     }
 
     // k较大时随机棋盘可能无解。周期底板无连续段，植入一次向下交换的保证图案。
-    for (int row = 0; row < BOARD_ROWS; ++row) // row：周期底板行
-        for (int col = 0; col < BOARD_COLS; ++col) // col：周期底板列
+    for (int row = 0; row < game->rows; ++row) // row：周期底板行
+        for (int col = 0; col < game->cols; ++col) // col：周期底板列
             game->board[row][col] = (row + col) % ITEM_TYPES + 1;
     game->board[0][0] = 2;
     game->board[1][0] = 1;
@@ -122,11 +122,26 @@ void initializeBoard(Game* game)
 
 void initializeGame(Game* game, const char* name, int matchLength)
 {
+    initializeGameWithSize(game, name, matchLength, BOARD_SIZE_COUNT);
+}
+
+const char* getBoardSizeName(int boardSize)
+{
+    const char* names[BOARD_SIZE_COUNT] = { "小型", "中型", "大型" }; // 三种规模名称
+    int index = boardSize >= 1 && boardSize <= BOARD_SIZE_COUNT ? boardSize - 1 : 2; // 合法档位
+    return names[index];
+}
+
+void initializeGameWithSize(Game* game, const char* name, int matchLength, int boardSize)
+{
     char copiedName[PLAYER_NAME_LENGTH] = { 0 }; // 允许重开时传入原状态中的昵称
     snprintf(copiedName, sizeof(copiedName), "%s", name);
     memset(game, 0, sizeof(*game));
     memcpy(game->playerName, copiedName, sizeof(game->playerName));
     game->matchLength = matchLength >= 3 && matchLength <= 5 ? matchLength : 3;
+    game->boardSize = boardSize >= 1 && boardSize <= BOARD_SIZE_COUNT ? boardSize : BOARD_SIZE_COUNT;
+    game->rows = game->boardSize == 1 ? 10 : game->boardSize == 2 ? 15 : 20;
+    game->cols = game->boardSize == 1 ? 10 : game->boardSize == 2 ? 20 : 30;
     game->level = 1;
     initializeBoard(game);
     game->startTime = time(NULL);
@@ -154,8 +169,8 @@ int analyzeMatches(const Game* game, MatchResult* result)
     // 两种方向使用同一连续段扫描；每次end停在段后一格，避免漏掉长度大于k的段。
     for (int vertical = 0; vertical <= 1; ++vertical) // vertical：当前扫描方向
     {
-        int lineCount = vertical ? BOARD_COLS : BOARD_ROWS; // 需要扫描的线数
-        int lineLength = vertical ? BOARD_ROWS : BOARD_COLS; // 单条线长度
+        int lineCount = vertical ? game->cols : game->rows; // 需要扫描的线数
+        int lineLength = vertical ? game->rows : game->cols; // 单条线长度
         for (int line = 0; line < lineCount; ++line) // line：行或列编号
         {
             int start = 0; // 当前连续段起点
@@ -174,8 +189,8 @@ int analyzeMatches(const Game* game, MatchResult* result)
             }
         }
     }
-    for (int row = 0; row < BOARD_ROWS; ++row) // row：去重统计行
-        for (int col = 0; col < BOARD_COLS; ++col) // col：去重统计列
+    for (int row = 0; row < game->rows; ++row) // row：去重统计行
+        for (int col = 0; col < game->cols; ++col) // col：去重统计列
             result->uniqueCount += result->marked[row][col];
     return result->uniqueCount;
 }
@@ -183,9 +198,9 @@ int analyzeMatches(const Game* game, MatchResult* result)
 int clearMatches(Game* game, const MatchResult* result)
 {
     int count = 0; // 实际清除的非空格数量
-    for (int row = 0; row < BOARD_ROWS; ++row) // row：待清除行
+    for (int row = 0; row < game->rows; ++row) // row：待清除行
     {
-        for (int col = 0; col < BOARD_COLS; ++col) // col：待清除列
+        for (int col = 0; col < game->cols; ++col) // col：待清除列
         {
             if (result->marked[row][col] && game->board[row][col] != 0)
             {
@@ -201,10 +216,10 @@ int clearMatches(Game* game, const MatchResult* result)
 int applyGravity(Game* game, CellChange changes[BOARD_CELLS])
 {
     int count = 0; // 实际移动数量
-    for (int col = 0; col < BOARD_COLS; ++col) // col：当前压缩列
+    for (int col = 0; col < game->cols; ++col) // col：当前压缩列
     {
-        int writeRow = BOARD_ROWS - 1; // 下一个写入位置
-        for (int row = BOARD_ROWS - 1; row >= 0; --row) // row：从底部读取的行
+        int writeRow = game->rows - 1; // 下一个写入位置
+        for (int row = game->rows - 1; row >= 0; --row) // row：从底部读取的行
         {
             int value = game->board[row][col]; // 当前物品
             if (value == 0) continue;
@@ -222,9 +237,9 @@ int applyGravity(Game* game, CellChange changes[BOARD_CELLS])
 int fillEmptyCells(Game* game, CellChange changes[BOARD_CELLS])
 {
     int count = 0; // 新生成的物品数
-    for (int row = 0; row < BOARD_ROWS; ++row) // row：补充行
+    for (int row = 0; row < game->rows; ++row) // row：补充行
     {
-        for (int col = 0; col < BOARD_COLS; ++col) // col：补充列
+        for (int col = 0; col < game->cols; ++col) // col：补充列
         {
             if (game->board[row][col] == 0)
             {
@@ -280,9 +295,9 @@ int beginRound(const Game* game, RoundExecution* round, int row, int col, char d
 {
     int targetRow; // 相邻目标行
     int targetCol; // 相邻目标列
-    if (round->active || game->score >= 1200 || row < 1 || row > BOARD_ROWS ||
-        col < 1 || col > BOARD_COLS ||
-        !getTargetPosition(row - 1, col - 1, direction, &targetRow, &targetCol))
+    if (round->active || game->score >= 1200 || row < 1 || row > game->rows ||
+        col < 1 || col > game->cols ||
+        !getTargetPosition(game, row - 1, col - 1, direction, &targetRow, &targetCol))
         return -1;
     memset(round, 0, sizeof(*round));
     round->original = *game;
@@ -362,7 +377,7 @@ int advanceRound(Game* game, RoundExecution* round)
         if (round->levelResult != 2 && !findLegalMove(game, &move))
         {
             initializeBoard(game);
-            round->changeCount = BOARD_CELLS;
+            round->changeCount = game->rows * game->cols;
         }
         round->nextStage = STAGE_FINISH;
         break;
