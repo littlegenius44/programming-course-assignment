@@ -1,4 +1,4 @@
-# 消消乐 · C 语言算法展示课程作业
+# 消消乐 2.0 · C 语言算法展示课程作业
 
 本目录的命令行版与 raylib 版共用一套二维数组算法。重点是展示“交换、检测、消除、下落、补充、连锁和结算”的真实过程，未增加案例模块或游戏道具。
 
@@ -11,7 +11,9 @@
 
 项目需要 VS2022 v143 编译工具、Windows SDK，以及本目录已有的 raylib-sdk。命令行使用 UTF-8 输入输出；图形界面读取本机 Windows Fonts 目录的黑体 TTF 字体，不下载或分发字体文件。
 
-本次版本是本地课程整理版；已发布的 console-v1.0.0、raylib-v1.0.0 和网页版保持原样。
+本次桌面版本为2.0.0，源码发布在独立分支 release/desktop-v2.0。两个运行包分别对应 console-v2.0.0 和 raylib-v2.0.0；既有1.0标签、发布记录和网页版保持原样。
+
+[命令行2.0发布页](https://github.com/littlegenius44/programming-course-assignment/releases/tag/console-v2.0.0) · [raylib 2.0发布页](https://github.com/littlegenius44/programming-course-assignment/releases/tag/raylib-v2.0.0) · [2.0更新说明](RELEASE_NOTES_v2.0.0.md)
 
 ## 命令行使用方法
 
@@ -20,6 +22,8 @@
 - 1 小型：10×10（10列、10行）。
 - 2 中型：20×15（20列、15行）。
 - 3 大型：30×20（30列、20行，原棋盘规模）。
+
+然后选择运行模式：
 
 - 1：正常模式，自动执行整回合，显示最终结果。
 - 2：演示模式，每阶段显示棋盘与说明，等待回车后才执行下一阶段。
