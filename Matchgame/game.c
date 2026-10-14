@@ -1,696 +1,417 @@
 ﻿#define  _CRT_SECURE_NO_WARNINGS 1
 #include "game.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
+#include <string.h>
 
-/*
- * 功能：初始化一局游戏的基本状态和棋盘
- * game：需要初始化的游戏状态
- * name：玩家昵称
- * matchLength：触发消除所需的最少连续物品数
- * 返回值：无
- */
-void initializeGame(Game *game, const char* name, int matchLength)
+/* 根据方向求相邻位置。row/col：0起下标；direction：WASD；
+ * targetRow/targetCol：输出位置；返回：是否在棋盘内。 */
+static int getTargetPosition(int row, int col, char direction,
+    int* targetRow, int* targetCol)
 {
-	//snprintf() 可以限制写入长度，因此更安全。此处用于保存昵称
-	snprintf(game->playerName, PLAYER_NAME_LENGTH, "%s", name);
-	//初始化游戏基本参数
-	game->matchLength = matchLength;
-	game->score = 0;
-	game->level = 1;
-	//初始化全0数组
+    *targetRow = row;
+    *targetCol = col;
+    switch (toupper((unsigned char)direction))
+    {
+    case 'W': --*targetRow; break;
+    case 'A': --*targetCol; break;
+    case 'S': ++*targetRow; break;
+    case 'D': ++*targetCol; break;
+    default: return 0;
+    }
+    return *targetRow >= 0 && *targetRow < BOARD_ROWS &&
+        *targetCol >= 0 && *targetCol < BOARD_COLS;
+}
+
+/* 交换两个合法位置。game：棋盘；r1/c1、r2/c2：0起下标；返回：无。 */
+static void swapItems(Game* game, int r1, int c1, int r2, int c2)
+{
+    int value = game->board[r1][c1]; // 暂存第一个物品
+    game->board[r1][c1] = game->board[r2][c2];
+    game->board[r2][c2] = value;
+}
+
+/* 检查当前位置的连续段。game：只读棋盘；row/col：位置；返回：是否匹配。 */
+static int hasMatchAt(const Game* game, int row, int col)
+{
+    int value = game->board[row][col]; // 当前物品
+    int horizontal = 1; // 横向长度
+    int vertical = 1; // 纵向长度
+    if (value == 0) return 0;
+    for (int c = col - 1; c >= 0 && game->board[row][c] == value; --c) // c：左侧列
+        ++horizontal;
+    for (int c = col + 1; c < BOARD_COLS && game->board[row][c] == value; ++c) // c：右侧列
+        ++horizontal;
+    for (int r = row - 1; r >= 0 && game->board[r][col] == value; --r) // r：上侧行
+        ++vertical;
+    for (int r = row + 1; r < BOARD_ROWS && game->board[r][col] == value; ++r) // r：下侧行
+        ++vertical;
+    return horizontal >= game->matchLength || vertical >= game->matchLength;
+}
+
+/* 检查初始化候选。game：棋盘；row/col：待填位置；value：候选；返回：是否匹配。 */
+static int createsInitialMatch(const Game* game, int row, int col, int value)
+{
+    int horizontal = 1; // 已有左侧连续数量
+    int vertical = 1; // 已有上方连续数量
+    for (int c = col - 1; c >= 0 && game->board[row][c] == value; --c) // c：左侧列
+        ++horizontal;
+    for (int r = row - 1; r >= 0 && game->board[r][col] == value; --r) // r：上方行
+        ++vertical;
+    return horizontal >= game->matchLength || vertical >= game->matchLength;
+}
+
+/* 见 game.h：提示只在副本模拟，不改原棋盘、不调用 rand。 */
+int findLegalMove(const Game* game, LegalMove* move)
+{
+    Game copy = *game; // 只读查找使用的局部副本
+    for (int row = 0; row < BOARD_ROWS; ++row) // row：交换起点行
+    {
+        for (int col = 0; col < BOARD_COLS; ++col) // col：交换起点列
+        {
+            for (int axis = 0; axis < 2; ++axis) // axis：右、下两种无重复方向
+            {
+                int r = row + (axis == 1); // 目标行
+                int c = col + (axis == 0); // 目标列
+                int valid; // 是否会形成匹配
+                if (r >= BOARD_ROWS || c >= BOARD_COLS) continue;
+                swapItems(&copy, row, col, r, c);
+                valid = hasMatchAt(&copy, row, col) || hasMatchAt(&copy, r, c);
+                swapItems(&copy, row, col, r, c);
+                if (valid)
+                {
+                    move->row = row + 1;
+                    move->col = col + 1;
+                    move->direction = axis == 0 ? 'D' : 'S';
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+void initializeBoard(Game* game)
+{
+    LegalMove move; // 用于确认棋盘可操作
+    for (int attempt = 0; attempt < 32; ++attempt) // attempt：有限生成次数
+    {
+        for (int row = 0; row < BOARD_ROWS; ++row) // row：生成行
+        {
+            for (int col = 0; col < BOARD_COLS; ++col) // col：生成列
+            {
+                int value; // 不产生初始消除的候选
+                do { value = rand() % ITEM_TYPES + 1; }
+                while (createsInitialMatch(game, row, col, value));
+                game->board[row][col] = value;
+            }
+        }
+        if (findLegalMove(game, &move)) return;
+    }
+
+    // k较大时随机棋盘可能无解。周期底板无连续段，植入一次向下交换的保证图案。
+    for (int row = 0; row < BOARD_ROWS; ++row) // row：周期底板行
+        for (int col = 0; col < BOARD_COLS; ++col) // col：周期底板列
+            game->board[row][col] = (row + col) % ITEM_TYPES + 1;
+    game->board[0][0] = 2;
+    game->board[1][0] = 1;
+    for (int col = 1; col < game->matchLength; ++col) // col：长度为k-1的稳定段
+        game->board[0][col] = 1;
+}
+
+void initializeGame(Game* game, const char* name, int matchLength)
+{
+    char copiedName[PLAYER_NAME_LENGTH] = { 0 }; // 允许重开时传入原状态中的昵称
+    snprintf(copiedName, sizeof(copiedName), "%s", name);
+    memset(game, 0, sizeof(*game));
+    memcpy(game->playerName, copiedName, sizeof(game->playerName));
+    game->matchLength = matchLength >= 3 && matchLength <= 5 ? matchLength : 3;
+    game->level = 1;
     initializeBoard(game);
     game->startTime = time(NULL);
 }
 
-
-/*
- * 功能：检查候选数字是否会产生初始消除
- * game：当前游戏状态
- * row：候选位置所在行
- * col：候选位置所在列
- * value：准备填入的数字
- * 返回值：1 表示会产生消除，0 表示不会
- */
-static int createsInitialMatch(
-    const Game* game, int row, int col, int value)
+/* 记录真实连续段。result：输出统计；row/col/length/value：段信息；
+ * vertical：方向；返回：无。 */
+static void addSegment(MatchResult* result, int row, int col,
+    int length, int value, int vertical)
 {
-    int horizontal = 1; // 横向连续数量
-    int vertical = 1;   // 纵向连续数量
-
-    // offset：候选位置与左侧待检查位置之间的列距离
-    // 检查左侧连续相同数字
-    for (int offset = 1; offset < game->matchLength; offset++)
-    {
-        if (col - offset >= 0 &&
-            game->board[row][col - offset] == value)
-        {
-            horizontal++;
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    // offset：候选位置与上方待检查位置之间的行距离
-    // 检查上方连续相同数字
-    for (int offset = 1; offset < game->matchLength; offset++)
-    {
-        if (row - offset >= 0 &&
-            game->board[row - offset][col] == value)
-        {
-            vertical++;
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    return horizontal >= game->matchLength || vertical >= game->matchLength;
+    MatchSegment* segment = &result->segments[result->segmentCount++]; // 新段记录
+    segment->row = row;
+    segment->col = col;
+    segment->length = length;
+    segment->value = value;
+    segment->vertical = vertical;
+    result->rawCount += length;
+    for (int offset = 0; offset < length; ++offset) // offset：段内偏移
+        result->marked[row + (vertical ? offset : 0)][col + (vertical ? 0 : offset)] = 1;
 }
 
-
-/*
- * 功能：生成无初始消除的随机棋盘
- * game：需要初始化棋盘的游戏状态
- * 返回值：无
- */
-void initializeBoard(Game* game)
+int analyzeMatches(const Game* game, MatchResult* result)
 {
-    // row：当前生成物品的行下标
-    // 遍历每一行
-    for (int row = 0; row < BOARD_ROWS; row++)
+    memset(result, 0, sizeof(*result));
+    // 两种方向使用同一连续段扫描；每次end停在段后一格，避免漏掉长度大于k的段。
+    for (int vertical = 0; vertical <= 1; ++vertical) // vertical：当前扫描方向
     {
-        // col：当前生成物品的列下标
-        // 遍历当前行的每一列
-        for (int col = 0; col < BOARD_COLS; col++)
+        int lineCount = vertical ? BOARD_COLS : BOARD_ROWS; // 需要扫描的线数
+        int lineLength = vertical ? BOARD_ROWS : BOARD_COLS; // 单条线长度
+        for (int line = 0; line < lineCount; ++line) // line：行或列编号
         {
-            int value; // 候选随机数字
-
-            // 不断尝试，直到不会产生消除
-            do
+            int start = 0; // 当前连续段起点
+            while (start < lineLength)
             {
-                value = rand() % ITEM_TYPES + 1;
-            } while (createsInitialMatch(game, row, col, value));
-
-            // 保存合法数字
-            game->board[row][col] = value;
-        }
-    }
-}
-
-/*
- * 功能：在控制台显示玩家信息、游戏状态和棋盘
- * game：需要显示的游戏状态，只读
- * 返回值：无
- */
-void displayGame(const Game* game)
-{
-	printf("\n===== Match Game =====\n");
-	printf("Player: %s\n", game->playerName);
-	printf("Level : %d\n", game->level);
-	printf("Score : %d\n", game->score);
-    printf("Time  : %ld seconds\n", getElapsedSeconds(game));
-	printf("Match : %d\n", game->matchLength);
-
-
-    // 打印列编号
-    printf("\n    ");
-
-    // col：当前显示的列下标
-    for (int col = 0; col < BOARD_COLS; col++)
-    {
-        printf("%2d", col + 1);
-    }
-
-    printf("\n");
-
-    // row：当前显示的行下标
-    // 打印棋盘
-    for (int row = 0; row < BOARD_ROWS; row++)
-    {
-        // 打印行编号
-        printf("%2d |", row + 1);
-
-        // col：当前行中正在显示的列下标
-        // 打印当前行的全部数字
-        for (int col = 0; col < BOARD_COLS; col++)
-        {
-            printf("%2d", game->board[row][col]);
-        }
-
-        printf("\n");
-    }
-}
-/*
-     * 功能：根据方向计算交换目标位置
-     * row, col：当前位置（数组下标）
-     * direction：移动方向
-     * targetRow, targetCol：输出目标位置
-     * 返回值：1合法，0非法
-     */
-static int getTargetPosition(int row, int col, char direction, int* targetRow, int* targetCol)
-{
-    // 初始目标位置等于当前位置
-    *targetRow = row;
-    *targetCol = col;
-
-    // 根据方向修改目标坐标
-    switch (direction)
-    {
-    case 'W':
-        (*targetRow)--;
-        break;
-
-    case 'S':
-        (*targetRow)++;
-        break;
-
-    case 'A':
-        (*targetCol)--;
-        break;
-
-    case 'D':
-        (*targetCol)++;
-        break;
-
-    default:
-        return 0;
-    }
-
-    // 检查目标位置是否越界
-    if (*targetRow < 0 || *targetRow >= BOARD_ROWS ||
-        *targetCol < 0 || *targetCol >= BOARD_COLS)
-    {
-        return 0;
-    }
-
-    return 1;
-}
-
-/*
- * 功能：交换棋盘上两个位置的数字
- * game：当前游戏状态
- * row1, col1：第一个位置
- * row2, col2：第二个位置
- * 返回值：无
- */
-static void swapItems(Game* game,int row1, int col1,int row2, int col2)
-{
-    int temp; // 临时存放一个数字
-    temp = game->board[row1][col1];
-    game->board[row1][col1] = game->board[row2][col2];
-    game->board[row2][col2] = temp;
-}
-
-/*
- * 功能：检查指定位置是否形成连续消除
- * game：当前游戏状态
- * row, col：需要检查的位置（数组下标）
- * 返回值：1表示形成消除，0表示没有
- */
-//static int hasMatchAt(
-//    const Game* game, int row, int col)
-//{
-//    int value = game->board[row][col]; // 当前数字
-//    int horizontal = 1; // 横向连续数量
-//    int vertical = 1;   // 纵向连续数量
-//
-//    // c：当前向左检查的列下标
-//    // 向左检查
-//    for (int c = col - 1; c >= 0; c--)
-//    {
-//        if (game->board[row][c] == value)
-//            horizontal++;
-//    }
-//    // c：当前向右检查的列下标
-//    // 向右检查
-//    for (int c = col + 1; c < BOARD_COLS; c++)
-//    {
-//        if (game->board[row][c] == value)
-//            horizontal++;
-//    }
-//
-//    // r：当前向上检查的行下标
-//    // 向上检查
-//    for (int r = row - 1; r >= 0; r--)
-//    {
-//        if (game->board[r][col] == value)
-//            vertical++;
-//    }
-//
-//    // r：当前向下检查的行下标
-//    // 向下检查
-//    for (int r = row + 1; r < BOARD_ROWS; r++)
-//    {
-//        if (game->board[r][col] == value)
-//            vertical++;
-//    }
-//    // 检查横向或纵向是否达到消除长度
-//    return horizontal >= game->matchLength || vertical >= game->matchLength;
-//}
-/*
- * 功能：检查指定位置是否形成连续消除
- * game：当前游戏状态
- * row, col：需要检查的位置（数组下标）
- * 返回值：1表示形成消除，0表示没有
- */
-static int hasMatchAt(
-    const Game* game, int row, int col)
-{
-    int value = game->board[row][col]; // 当前数字
-    int horizontal = 1; // 横向连续数量
-    int vertical = 1;   // 纵向连续数量
-
-    // c：当前向左检查的列下标
-    for (int c = col - 1; c >= 0; c--)
-    {
-        if (game->board[row][c] == value)
-        {
-            horizontal++;
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    // c：当前向右检查的列下标
-    for (int c = col + 1; c < BOARD_COLS; c++)
-    {
-        if (game->board[row][c] == value)
-        {
-            horizontal++;
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    // r：当前向上检查的行下标
-    for (int r = row - 1; r >= 0; r--)
-    {
-        if (game->board[r][col] == value)
-        {
-            vertical++;
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    // r：当前向下检查的行下标
-    for (int r = row + 1; r < BOARD_ROWS; r++)
-    {
-        if (game->board[r][col] == value)
-        {
-            vertical++;
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    return horizontal >= game->matchLength ||
-        vertical >= game->matchLength;
-}
-
-/*
- * 功能：执行完整的一次玩家操作
- * 保留给原来的控制台版本使用
- */
-int playMove(
-    Game* game, int row, int col, char direction)
-{
-    int result = trySwapOnly(game, row, col, direction);
-
-    if (result == 1)
-    {
-        // 控制台版直接完成全部消除与连锁
-        processMatches(game);
-    }
-
-    return result;
-}
-
-/*
- * 功能：查找棋盘中全部可消除的位置
- * game：当前游戏状态
- * marked：输出标记数组，1表示需要消除
- * 返回值：需要消除的格子总数
- * 说明：每轮需要扫描完整棋盘，因为下落和随机补充可能在任意位置产生连锁
- */
-int findMatches(
-    const Game* game,
-    int marked[BOARD_ROWS][BOARD_COLS])
-{
-    int count = 0; // 需要消除的格子数量
-
-    // row：初始化标记数组时的行下标
-    // 初始化标记数组，全部设为0
-    for (int row = 0; row < BOARD_ROWS; row++)
-    {
-        // col：初始化标记数组时的列下标
-        for (int col = 0; col < BOARD_COLS; col++)
-        {
-            marked[row][col] = 0;
-        }
-    }
-
-    // row：当前执行横向扫描的行下标
-    // 第一轮：横向扫描
-    for (int row = 0; row < BOARD_ROWS; row++)
-    {
-        int start = 0; // 当前连续段起点
-
-        while (start < BOARD_COLS)
-        {
-            int end = start + 1; // 连续段终点的后一列
-
-            // 向右查找连续相同数字
-            while (end < BOARD_COLS &&
-                game->board[row][end] ==
-                game->board[row][start])
-            {
-                end++;
+                int row = vertical ? start : line; // 起点行
+                int col = vertical ? line : start; // 起点列
+                int value = game->board[row][col]; // 连续段物品
+                int end = start + 1; // 连续段后一格
+                while (end < lineLength &&
+                    game->board[vertical ? end : line][vertical ? line : end] == value)
+                    ++end;
+                if (value != 0 && end - start >= game->matchLength)
+                    addSegment(result, row, col, end - start, value, vertical);
+                start = end;
             }
-
-            // 判断当前连续段是否满足消除条件
-            if (game->board[row][start] != 0 &&
-                end - start >= game->matchLength)
-            {
-                // col：当前连续段内需要标记的列下标
-                for (int col = start; col < end; col++)
-                {
-                    marked[row][col] = 1;
-                }
-            }
-
-            // 继续查找下一组连续数字
-            start = end;
         }
     }
+    for (int row = 0; row < BOARD_ROWS; ++row) // row：去重统计行
+        for (int col = 0; col < BOARD_COLS; ++col) // col：去重统计列
+            result->uniqueCount += result->marked[row][col];
+    return result->uniqueCount;
+}
 
-    // col：当前执行纵向扫描的列下标
-    // 第二轮：纵向扫描
-    for (int col = 0; col < BOARD_COLS; col++)
+int clearMatches(Game* game, const MatchResult* result)
+{
+    int count = 0; // 实际清除的非空格数量
+    for (int row = 0; row < BOARD_ROWS; ++row) // row：待清除行
     {
-        int start = 0; // 当前连续段起点
-
-        while (start < BOARD_ROWS)
+        for (int col = 0; col < BOARD_COLS; ++col) // col：待清除列
         {
-            int end = start + 1; // 连续段终点的下一行
-
-            // 向下查找连续相同数字
-            while (end < BOARD_ROWS &&
-                game->board[end][col] ==
-                game->board[start][col])
+            if (result->marked[row][col] && game->board[row][col] != 0)
             {
-                end++;
+                game->board[row][col] = 0;
+                ++count;
             }
-
-            if (game->board[start][col] != 0 &&
-                end - start >= game->matchLength)
-            {
-                // row：当前连续段内需要标记的行下标
-                for (int row = start; row < end; row++)
-                {
-                    marked[row][col] = 1;
-                }
-            }
-
-            start = end;
         }
     }
+    game->score += count * POINTS_PER_ITEM;
+    return count;
+}
 
-    // row：统计已标记位置时的行下标
-    // 统计标记的格子总数
-    for (int row = 0; row < BOARD_ROWS; row++)
+int applyGravity(Game* game, CellChange changes[BOARD_CELLS])
+{
+    int count = 0; // 实际移动数量
+    for (int col = 0; col < BOARD_COLS; ++col) // col：当前压缩列
     {
-        // col：统计已标记位置时的列下标
-        for (int col = 0; col < BOARD_COLS; col++)
+        int writeRow = BOARD_ROWS - 1; // 下一个写入位置
+        for (int row = BOARD_ROWS - 1; row >= 0; --row) // row：从底部读取的行
         {
-            if (marked[row][col] == 1)
+            int value = game->board[row][col]; // 当前物品
+            if (value == 0) continue;
+            if (row != writeRow)
+                changes[count++] = (CellChange){ row, col, writeRow, col, value };
+            game->board[writeRow--][col] = value;
+        }
+        // 底部压缩后只清空剩余顶部位置，不影响未消除物品的相对顺序。
+        for (int row = writeRow; row >= 0; --row) // row：顶部空位
+            game->board[row][col] = 0;
+    }
+    return count;
+}
+
+int fillEmptyCells(Game* game, CellChange changes[BOARD_CELLS])
+{
+    int count = 0; // 新生成的物品数
+    for (int row = 0; row < BOARD_ROWS; ++row) // row：补充行
+    {
+        for (int col = 0; col < BOARD_COLS; ++col) // col：补充列
+        {
+            if (game->board[row][col] == 0)
             {
-                count++;
+                int value = rand() % ITEM_TYPES + 1; // 只在实际补充阶段生成一次
+                game->board[row][col] = value;
+                changes[count++] = (CellChange){ -1, col, row, col, value };
             }
         }
     }
     return count;
 }
 
-
-
-/*
- * 功能：清除被标记的物品，并累计分数
- * game：当前游戏状态
- * marked：待消除位置，1表示需要消除
- */
-void clearMatches(
-    Game *game,
-    const int marked[BOARD_ROWS][BOARD_COLS])
+int getLevelTarget(const Game* game)
 {
-    int count = 0; // 实际清除的格子数量
-
-    for (int row = 0; row < BOARD_ROWS; row++)
-    {
-        for (int col = 0; col < BOARD_COLS; col++)
-        {
-            if (marked[row][col] == 1 &&
-                game->board[row][col] != 0)
-            {
-                game->board[row][col] = 0;
-                count++;
-            }
-        }
-    }
-
-    // 每消除一个物品获得10分
-    game->score += count * 10;
+    const int targets[LEVEL_COUNT] = { 300, 700, 1200 }; // 累计分数阈值
+    int index = game->level - 1; // 当前关下标
+    return targets[index >= 0 && index < LEVEL_COUNT ? index : LEVEL_COUNT - 1];
 }
 
-
-/*
- * 功能：模拟重力，使所有非零物品向下压缩
- * game：当前游戏状态
- * 返回值：无
- */
-void applyGravity(Game* game)
-{
-    // col：当前执行重力处理的列下标
-    // 每一列独立处理
-    for (int col = 0; col < BOARD_COLS; col++)
-    {
-        // 从该列最底部开始填充
-        int writeRow = BOARD_ROWS - 1;
-
-        // row：从下向上读取物品时的行下标
-        // 从下往上寻找非零物品
-        for (int row = BOARD_ROWS - 1; row >= 0; row--)
-        {
-            if (game->board[row][col] != 0)
-            {
-                // 将非零物品移动到目标位置
-                game->board[writeRow][col] =
-                    game->board[row][col];
-
-                writeRow--;
-            }
-        }
-
-        // row：当前需要清空的顶部行下标
-        // 将剩余的顶部位置全部设为0
-        for (int row = writeRow; row >= 0; row--)
-        {
-            game->board[row][col] = 0;
-        }
-    }
-}
-
-/*
- * 功能：随机生成新物品，填充全部空白
- * game：当前游戏状态
- * 返回值：无
- */
-void fillEmptyCells(Game* game)
-{
-    // row：当前检查的行下标
-    for (int row = 0; row < BOARD_ROWS; row++)
-    {
-        // col：当前检查的列下标
-        for (int col = 0; col < BOARD_COLS; col++)
-        {
-            if (game->board[row][col] == 0)
-            {
-                game->board[row][col] =
-                    rand() % ITEM_TYPES + 1;
-            }
-        }
-    }
-}
-
-/*
- * 功能：处理当前棋盘中的全部消除与连锁
- * game：当前游戏状态
- * 返回值：本次操作累计消除的格子数量
- */
-int processMatches(Game* game)
-{
-    // 本轮消除位置的标记数组
-    int marked[BOARD_ROWS][BOARD_COLS];
-
-    int count;           // 当前一轮消除的格子数量
-    int totalCleared = 0; // 本次操作的累计消除数量
-    int chain = 0;       // 连锁消除轮数
-
-    while (1)
-    {
-        // 寻找本轮所有需要消除的位置
-        count = findMatches(game, marked);
-
-        // 没有消除项，棋盘进入稳定状态
-        if (count == 0)
-        {
-            break;
-        }
-
-        chain++;
-
-        // 统一清除所有标记的物品
-        clearMatches(game, marked);
-
-        // 每个被消除的物品获得10分
-        totalCleared += count;
-
-        // 让剩余物品下落
-        applyGravity(game);
-
-        // 随机补充顶部空白
-        fillEmptyCells(game);
-
-        // 临时输出，方便观察连锁过程
-        printf("Chain %d: cleared %d items (+%d)\n",
-            chain, count, count * 10);
-    }
-
-    return totalCleared;
-}
-
-/*
- * 功能：获取当前游戏累计用时
- * game：当前游戏状态（只读）
- * 返回值：累计用时，单位秒
- */
-long getElapsedSeconds(const Game* game)
-{
-    time_t now;   // 当前时间
-    double elapsed; // 已经过的秒数
-
-    now = time(NULL);
-
-    // 计算当前时间与游戏开始时间的差值
-    elapsed = difftime(now, game->startTime);
-
-    if (elapsed < 0)
-    {
-        return 0;
-    }
-
-    return (long)elapsed;
-}
-
-/*
- * 功能：根据累计分数更新关卡
- * game：当前游戏状态
- * 返回值：
- *   0：关卡没有变化
- *   1：进入下一关
- *   2：整局游戏胜利
- */
 int updateLevel(Game* game)
 {
-    int oldLevel; // 更新前的关卡编号
-
-    oldLevel = game->level;
-
-    // 第一关：达到300分进入第二关
-    if (game->level == 1 && game->score >= 300)
-    {
-        game->level = 2;
-    }
-
-    // 第二关：达到700分进入第三关
-    if (game->level == 2 && game->score >= 700)
-    {
-        game->level = 3;
-    }
-
-    // 第三关：达到1200分获得最终胜利
-    if (game->level == 3 && game->score >= 1200)
-    {
-        return 2;
-    }
-
-    // 如果关卡发生变化，则生成新棋盘
-    if (game->level != oldLevel)
-    {
-        initializeBoard(game);
-        return 1;
-    }
-
+    int oldLevel = game->level; // 更新前关卡
+    if (game->score >= 1200) { game->level = 3; return 2; }
+    game->level = game->score >= 700 ? 3 : game->score >= 300 ? 2 : 1;
+    if (game->level != oldLevel) { initializeBoard(game); return 1; }
     return 0;
 }
 
-/*
- * 功能：尝试交换，不执行消除结算
- * row、col：玩家坐标，从1开始
- * direction：W、A、S、D
- * 返回：1有效、0无效、-1非法
- */
-int trySwapOnly(
-    Game* game, int row, int col, char direction)
+void setGamePaused(Game* game, int paused)
 {
-    int targetRow; // 目标行
-    int targetCol; // 目标列
-
-    // 转换成从0开始的数组下标
-    row--;
-    col--;
-
-    // 检查起始位置
-    if (row < 0 || row >= BOARD_ROWS ||
-        col < 0 || col >= BOARD_COLS)
+    time_t now = time(NULL); // 当前墙钟时间
+    if (paused && !game->clockPaused)
     {
+        game->pausedAt = now;
+        game->clockPaused = 1;
+    }
+    else if (!paused && game->clockPaused)
+    {
+        long duration = (long)difftime(now, game->pausedAt); // 本次暂停秒数
+        if (duration > 0) game->pausedSeconds += duration;
+        game->clockPaused = 0;
+    }
+}
+
+long getElapsedSeconds(const Game* game)
+{
+    time_t end = game->clockPaused ? game->pausedAt : time(NULL); // 计时终点
+    long elapsed = (long)difftime(end, game->startTime) - game->pausedSeconds; // 扣除暂停
+    return elapsed > 0 ? elapsed : 0;
+}
+
+int beginRound(const Game* game, RoundExecution* round, int row, int col, char direction)
+{
+    int targetRow; // 相邻目标行
+    int targetCol; // 相邻目标列
+    if (round->active || game->score >= 1200 || row < 1 || row > BOARD_ROWS ||
+        col < 1 || col > BOARD_COLS ||
+        !getTargetPosition(row - 1, col - 1, direction, &targetRow, &targetCol))
         return -1;
-    }
+    memset(round, 0, sizeof(*round));
+    round->original = *game;
+    round->fromRow = row - 1;
+    round->fromCol = col - 1;
+    round->toRow = targetRow;
+    round->toCol = targetCol;
+    round->stage = STAGE_READY;
+    round->nextStage = STAGE_SWAP;
+    round->active = 1;
+    return 1;
+}
 
-    direction = (char)toupper((unsigned char)direction);
-
-    // 检查交换方向和目标位置
-    if (!getTargetPosition(
-        row, col, direction, &targetRow, &targetCol))
+void cancelRound(Game* game, RoundExecution* round)
+{
+    if (round->active)
     {
-        return -1;
+        Game restored = round->original; // 回合前状态
+        restored.startTime = game->startTime;
+        restored.pausedAt = game->pausedAt;
+        restored.pausedSeconds = game->pausedSeconds;
+        restored.clockPaused = game->clockPaused;
+        *game = restored;
+        round->active = 0;
     }
+}
 
-    // 先尝试交换
-    swapItems(game, row, col, targetRow, targetCol);
-
-    // 有效交换：保留棋盘，等待后续消除
-    if (hasMatchAt(game, row, col) ||
-        hasMatchAt(game, targetRow, targetCol))
+int advanceRound(Game* game, RoundExecution* round)
+{
+    if (!round->active) return 0;
+    memcpy(round->before, game->board, sizeof(round->before));
+    round->stage = round->nextStage;
+    round->scoreDelta = 0;
+    round->changeCount = 0;
+    switch (round->stage)
     {
-        return 1;
+    case STAGE_SWAP:
+        swapItems(game, round->fromRow, round->fromCol, round->toRow, round->toCol);
+        round->nextStage = STAGE_MATCH;
+        break;
+    case STAGE_MATCH:
+        analyzeMatches(game, &round->matches);
+        if (round->matches.uniqueCount == 0)
+            round->nextStage = round->chain == 0 ? STAGE_REVERT : STAGE_LEVEL;
+        else if (round->chain >= MAX_CHAIN_ROUNDS)
+            round->nextStage = STAGE_ERROR;
+        else
+            round->nextStage = STAGE_CLEAR;
+        break;
+    case STAGE_REVERT:
+        swapItems(game, round->fromRow, round->fromCol, round->toRow, round->toCol);
+        round->valid = 0;
+        round->nextStage = STAGE_FINISH;
+        break;
+    case STAGE_CLEAR:
+        round->totalCleared += clearMatches(game, &round->matches);
+        round->scoreDelta = round->matches.uniqueCount * POINTS_PER_ITEM;
+        ++round->chain;
+        round->valid = 1;
+        round->nextStage = STAGE_GRAVITY;
+        break;
+    case STAGE_GRAVITY:
+        round->changeCount = applyGravity(game, round->changes);
+        round->nextStage = STAGE_REFILL;
+        break;
+    case STAGE_REFILL:
+        round->changeCount = fillEmptyCells(game, round->changes);
+        round->nextStage = STAGE_MATCH;
+        break;
+    case STAGE_LEVEL:
+        round->levelResult = updateLevel(game);
+        round->nextStage = STAGE_SHUFFLE;
+        break;
+    case STAGE_SHUFFLE:
+    {
+        LegalMove move; // 用于检测稳定棋盘是否有操作
+        if (round->levelResult != 2 && !findLegalMove(game, &move))
+        {
+            initializeBoard(game);
+            round->changeCount = BOARD_CELLS;
+        }
+        round->nextStage = STAGE_FINISH;
+        break;
     }
+    case STAGE_FINISH:
+        if (round->valid)
+        {
+            ++game->successfulMoves;
+            game->totalCleared += round->totalCleared;
+            if (round->chain > game->maxChain) game->maxChain = round->chain;
+        }
+        round->active = 0;
+        if (round->levelResult == 2) setGamePaused(game, 1);
+        break;
+    case STAGE_ERROR:
+        cancelRound(game, round);
+        round->valid = -1;
+        break;
+    default:
+        cancelRound(game, round);
+        round->valid = -1;
+        round->stage = STAGE_ERROR;
+        break;
+    }
+    return 1;
+}
 
-    // 无效交换：恢复原来的棋盘
-    swapItems(game, row, col, targetRow, targetCol);
+int playMove(Game* game, int row, int col, char direction)
+{
+    RoundExecution round = { 0 }; // 正常模式也使用相同阶段
+    if (beginRound(game, &round, row, col, direction) != 1) return -1;
+    while (round.active) advanceRound(game, &round);
+    return round.valid;
+}
 
-    return 0;
+const char* getStageName(GameStage stage)
+{
+    switch (stage)
+    {
+    case STAGE_SWAP: return "交换";
+    case STAGE_MATCH: return "检测匹配";
+    case STAGE_REVERT: return "恢复交换";
+    case STAGE_CLEAR: return "消除与计分";
+    case STAGE_GRAVITY: return "重力下落";
+    case STAGE_REFILL: return "随机补充";
+    case STAGE_LEVEL: return "关卡结算";
+    case STAGE_SHUFFLE: return "可用操作检测";
+    case STAGE_FINISH: return "回合结束";
+    case STAGE_ERROR: return "异常中止";
+    default: return "等待操作";
+    }
 }
